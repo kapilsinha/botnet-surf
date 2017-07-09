@@ -1,7 +1,5 @@
 '''
 Intro to this package is on https://pypi.python.org/pypi/pypcapfile
-NOTE: This program will combine consecutive packets between two nodes
-to simplify the final graph
 
 Types of variables in the package:
 print type(capfile.packets[0])
