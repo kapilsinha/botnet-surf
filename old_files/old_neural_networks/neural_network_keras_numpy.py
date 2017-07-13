@@ -49,31 +49,28 @@ def generate_input_arrays(pcap_filename, botnet_nodes, pcap_duration, \
 	savefile_y='y.txt', verbose = True):
 	pcap_graph = create_graph.PcapGraph(pcap_filename, \
 		step_length = step_length, interval_length = interval_length)
-	# I split the input or output values into training and testing set later
+	# I am not splitting the input or output values into training and testing
+	# sets - I do that later
 	# Input: 2D array of size (num_vertices, VECTOR_SIZE)
 	x = np.array([]).reshape(0, VECTOR_SIZE)
 	# Output: array of length num_vertices
 	# (1 if the corresponding vertex is malicious, 0 if it is non-malicious)
 	y = np.array([])
 
-	num = 5
-
 	if verbose == False:
 		blockPrint()
 
-	for i in range(int(float(pcap_duration - interval_length)/step_length)):
+	for i in range(int(((pcap_duration - interval_length)/step_length))):
 	#i = -1
 	#while pcap_graph.reached_file_end == False:
 	#	i += 1
-		print str(float(100 * i)/int(float(pcap_duration - interval_length)/step_length)) \
+		print str(float(100 * i)/int(((pcap_duration - interval_length)/step_length))) \
 			+ "%"
 		g = pcap_graph.make_graph()
-		# Degree
 		print "Out-degrees..."
 		outd = normalize(g.get_out_degrees(g.get_vertices()))
 		print "In-degrees..."
 		ind = normalize(g.get_in_degrees(g.get_vertices()))
-		# Number of neighbors
 		print "In-neighbors..."
 		inn = np.array([])
 		print "Out-neighbors..."
@@ -83,7 +80,6 @@ def generate_input_arrays(pcap_filename, botnet_nodes, pcap_duration, \
 			outn = np.append(outn, len(g.get_out_neighbours(v)))
 		inn = normalize(inn)
 		outn = normalize(outn)
-		# Centrality
 		print "Pagerank..."
 		pr = normalize(pagerank(g).a)
 		print "Betweenness..."
@@ -99,7 +95,6 @@ def generate_input_arrays(pcap_filename, botnet_nodes, pcap_duration, \
 		print "Authority..."
 		auth = normalize(hits(g)[1].a)
 		print "Hub..."
-		# Clustering
 		hub = normalize(hits(g)[2].a)
 		print "Clustering..."
 		clustering = normalize(local_clustering(g).a) # this seems to take a long time to run
@@ -107,32 +102,44 @@ def generate_input_arrays(pcap_filename, botnet_nodes, pcap_duration, \
 			print "Reached the end of the pcap file in the training phase"
 			sys.exit(1)
 
-		print "Appending to x..."
 		x = np.append(x, np.array([outd, ind, inn, outn, pr, b, c, ev, k, \
 			auth, hub, clustering]).transpose(), axis=0)
+
+		# If the node is a Botnet node and has been infected (the graph's latest
+		# timestamp is greater than the node's infection time), output is 1.
+		# Else output is 0
+		ip_address = np.array([])
+		for v in g.vertices():
+			ip_address = np.append(ip_address, g.vp.ip_address[v])
 		
-		print "Appending to y..."
-		for v in g.get_vertices():
-			#x = np.append(x, [[outd[v], ind[v], inn[v], outn[v], pr[v], b[v], \
-			#	c[v], ev[v], k[v], auth[v], hub[v], clustering[v]]], axis=0)
-			
+		y = np.append(y, np.in1d(ip_address, botnet_nodes).astype(int))
+		# doesn't account for the time....
+		'''
+		print "Iterating over vertices..."
+		for v in g.vertices():
+			# Note that some measures of centrality can be NaN so I change the NaN values
+			# to 0 by doing max('centrality'[v], 0)
+			x = np.append(x, [[v.out_degree(), v.in_degree(), \
+				len(g.get_in_neighbours(int(v))), len(g.get_out_neighbours(int(v))), \
+				max(0, pr[v]), max(0, b[v]), max(0, c[v]), max(0, ev[v]), max(0, k[v]), \
+				max(0, authority[v]), max(0, hub[v]), max(0, clustering[v])]], axis=0)
 			# If the node is a Botnet node and has been infected (the graph's latest
 			# timestamp is greater than the node's infection time), output is 1.
 			# Else output is 0
 			if g.vp.ip_address[v] in botnet_nodes.keys() and \
 				g.gp.latest_timestamp > botnet_nodes[g.vp.ip_address[v]]:
+				# COMMENT OUT THE TIME PORTION IF NOT TESTING ON SCENARIO 10
 					y = np.append(y, 1)
 			else:
 				y = np.append(y, 0)
-		# Save the file every 5% in case the loop fails at some point in the middle
-		if do_save and float(100 * i)/int(float(pcap_duration \
-			- interval_length)/step_length) > num:
-			num += 5
-			np.savetxt(savefile_x, x)
-			np.savetxt(savefile_y, y)
+		'''
 	enablePrint()
+
 	print "# of inputs: " + str(len(x))
 	print "# of outputs: " + str(len(y))
+	if do_save:
+		np.savetxt(savefile_x, x)
+		np.savetxt(savefile_y, y)
 	print "Finished creating the input file."
 	return x, y
 
@@ -237,18 +244,18 @@ def main():
 	                "147.32.84.204": 1313658313, "147.32.84.205": 1313658435, \
 	                "147.32.84.206": 1313658286, "147.32.84.207": 1313658260, \
 	                "147.32.84.208": 1313658232, "147.32.84.209": 1313658185}
-	pcap_duration = 17000 * .2 #* .58 # approximate duration of pcap capture (in seconds) of CTU-13 scenario 10
+	pcap_duration = 17000 * 0.1 #* .58 # approximate duration of pcap capture (in seconds) of CTU-13 scenario 10
 	pcap_file = sys.argv[1]
 
 	x, y = generate_input_arrays(pcap_file, botnet_nodes, pcap_duration, \
 		step_length = step_length, interval_length = interval_length, \
-		do_save=True, savefile_x='x.txt', savefile_y='y.txt', verbose = True)
+		do_save=False, savefile_x='x.txt', savefile_y='y.txt', verbose = True)
 	# x, y = load_input_arrays(filename_x='x.txt', filename_y='y.txt')
 	x_train, y_train, x_test, y_test = separate_into_sets(x, y, \
 		training_proportion = 0.7)
 
 	model = create_model(x_train, y_train, pcap_duration, step_length, \
-	 	save_model=True, savefile="model.h5")
+	 	save_model=False, savefile="model.h5")
 	# model = load_model('model.h5')
 	evaluate_model(model, x_test, y_test, pcap_duration, step_length)
 
