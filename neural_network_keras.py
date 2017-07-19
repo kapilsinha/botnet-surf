@@ -2,7 +2,12 @@ import sys, os
 from keras.models import Sequential
 from keras.layers import Dense, Dropout
 from keras.models import load_model
+import keras.backend as K
+import tensorflow as tf
 import numpy as np
+from sklearn.metrics import roc_curve, auc
+import matplotlib.pyplot as plt
+from random import random
 import create_graph
 from graph_tool.all import *
 
@@ -26,6 +31,59 @@ def enablePrint():
     sys.stdout = sys.__stdout__
 
 '''
+Creates balanced x and y files with the same name as the input but with an
+added "_balanced". Returns just the name of the files created
+Parameters:
+x_file - file with unbalanced number of x inputs
+y_file - file with unbalanced number of y inputs
+ratio - desired ratio of non-malicious to malicious nodes
+'''
+def balance_data(x_file, y_file, ratio=5):
+	x_out_filename = x_file.split('.')[0] + '_balanced.txt'
+	y_out_filename = y_file.split('.')[0] + '_balanced.txt'
+	x_in = open(x_file, 'r')
+	x_out = open(x_out_filename, 'w')
+	y_in = open(y_file, 'r')
+	y_out = open(y_out_filename, 'w')
+
+	line_count, positive_count = 0, 0
+	with open(y_file, 'r') as f:
+		for line in f:
+			if float(line) != 0:
+				positive_count += 1
+			line_count += 1
+
+	probability = float(ratio * positive_count)/line_count
+
+	index_list = [] # list of line indices of lines that are added to outfile
+	i = 0
+	for line in y_in:
+		if float(line) == 0:
+			add_to_file = random() < probability
+			if add_to_file:
+				index_list.append(i)
+				y_out.write(line)
+		else:
+			index_list.append(i)
+			y_out.write(line)
+		i += 1
+
+	j, k = 0, 0
+	for line in x_in:
+		if k >= len(index_list):
+			break
+		if j == index_list[k]:
+			x_out.write(line)
+			k += 1
+		j += 1
+
+	x_in.close()
+	x_out.close()
+	y_in.close()
+	y_out.close()
+	return x_out_filename, y_out_filename
+
+'''
 Normalizes a vertex characteristic by calculating (x - min)/(max - min)
 '''
 def normalize(array):
@@ -43,6 +101,12 @@ pcap_filename - Name of pcap file
 do_save - True if input arrays are saved in a file
 savefile_x - Name of x file
 savefile_y Name of y file
+
+NOTE: I REALIZED THIS AFTER THE FACT BUT I SHOULD HAVE KEPT EACH GRAPH AS A 
+BATCH AND NOT NORMALIZE IT WHEN READING IN THE FILE AND INSTEAD APPLYING THE
+KERAS FUNCTION normalize_batch_in_training ON THE BATCH.
+Changing this now will require re-reading the input files (which will take a 
+long time), so try experimenting with this later.
 '''
 def generate_input_arrays(pcap_filename, botnet_nodes, pcap_duration, \
 	step_length = 60, interval_length = 120, do_save=True, \
@@ -61,12 +125,20 @@ def generate_input_arrays(pcap_filename, botnet_nodes, pcap_duration, \
 	if verbose == False:
 		blockPrint()
 
-	for i in range(int(float(pcap_duration - interval_length)/step_length)):
-	#i = -1
-	#while pcap_graph.reached_file_end == False:
-	#	i += 1
+	#for i in range(int(float(pcap_duration - interval_length)/step_length)):
+	i = -1
+	while pcap_graph.reached_file_end == False:
+		i += 1
+		'''
+		IF the program freezes, calculate the last i based on the percentage
+		printed and write the number after the < sign
+		'''
 		print str(float(100 * i)/int(float(pcap_duration - interval_length) \
 			/step_length)) + "%"
+		if i < 12:
+			print "Dummy graph..."
+			pcap_graph.dummy_make_graph()
+			continue
 		g = pcap_graph.make_graph()
 		# Degree
 		print "Out-degrees..."
@@ -105,10 +177,6 @@ def generate_input_arrays(pcap_filename, botnet_nodes, pcap_duration, \
 		print "Clustering..."
 		clustering = normalize(local_clustering(g).a)
 		# this seems to take a long time to run
-		if pcap_graph.reached_file_end == True:
-			print "Reached the end of the pcap file in the training phase"
-			sys.exit(1)
-
 		print "Appending to x..."
 		x = np.append(x, np.array([outd, ind, inn, outn, pr, b, c, ev, k, \
 			auth, hub, clustering]).transpose(), axis=0)
@@ -122,16 +190,15 @@ def generate_input_arrays(pcap_filename, botnet_nodes, pcap_duration, \
 			# If the node is a Botnet node and has been infected (the graph's
 			# latest timestamp is greater than the node's infection time),
 			# output is 1. Else output is 0
-			if g.vp.ip_address[v] in botnet_nodes.keys(): #and \
-				#g.gp.latest_timestamp > botnet_nodes[g.vp.ip_address[v]]:
-				# REMOVE THE TIMESTAMP IF NOT TESTING ON SCENARIO 10
+			if g.vp.ip_address[v] in botnet_nodes.keys() and \
+				g.gp.latest_timestamp > botnet_nodes[g.vp.ip_address[v]]:
 					y = np.append(y, 1)
 			else:
 				y = np.append(y, 0)
 		# Save the file every 1% in case the loop fails at some point
 		if do_save and float(100 * i)/int(float(pcap_duration \
 			- interval_length)/step_length) > num:
-			num += 5
+			num += 1
 			np.savetxt(savefile_x, x)
 			np.savetxt(savefile_y, y)
 	enablePrint()
@@ -161,7 +228,7 @@ training_proportion - Decimal equivalent of how much of the arrays are to be
                       used for the training sets
 '''
 def separate_into_sets(x, y, training_proportion=0.7):
-	if training_proportion >= 1 or training_proportion <= 0:
+	if training_proportion > 1 or training_proportion < 0:
 		print "Training proportion must be 0 and 1"
 		sys.exit(1)
 	x_train = x[0:int(training_proportion * len(x))]
@@ -169,6 +236,28 @@ def separate_into_sets(x, y, training_proportion=0.7):
 	x_test = x[int(training_proportion * len(x)):]
 	y_test = y[int(training_proportion * len(y)):]
 	return x_train, y_train, x_test, y_test
+
+'''
+Defining a weighted mean square error. Note that I am now using TensorFlow
+specific functions so that is the required backend for this code to work...
+it should be easy to translate this to other backends though (I just couldn't
+figure out how to use Keras to do this).
+'''
+def my_loss_func(y_true, y_pred):
+	print y_true
+	print type(y_true)
+	print y_true.eval(session=tf.Session())
+	weighted_y_true = np.copy(y_true)
+	weighted_y_true[weighted_y_true == 1] = 250000
+	print weighted_y_true
+	print type(weighted_y_true)
+	weighted_y_pred = np.copy(y_pred)
+	weighted_y_pred[weighted_y_pred == 1] = 250000
+	# Weighted mean_absolute_error ?
+	#return K.mean(K.abs(weighted_y_pred - weighted_y_true), axis=-1)
+
+	# Weighted mean squared error?
+	return K.mean(K.square(weighted_y_pred - y_pred), axis=-1)
 
 '''
 Trains the model
@@ -195,10 +284,15 @@ def create_model(x_train, y_train, pcap_duration, step_length, \
 	model.add(Dense(15, activation='relu'))
 	model.add(Dropout(0.5))
 	model.add(Dense(1, activation='sigmoid'))
-	model.compile(optimizer='rmsprop', loss='binary_crossentropy', \
-		metrics=['accuracy'])
+	model.compile(optimizer='rmsprop', loss='mean_squared_error', \
+		metrics=['accuracy', true_positives, true_negatives, \
+		false_positives, false_negatives])
 	model.fit(x_train, y_train, epochs=2000, \
 		batch_size=int(pcap_duration/(step_length * 2)))
+		#sample_weight = weights)
+		# class_weight = {0.: 1., 1.: 25000})  --> doesn't do anything??
+	# for scenario 12, I think there are 187 1 outputs and 466294 total outputs
+	# - hence the 1:2500 class weight
 	if save_model == True:
 		try:
 			model.save(savefile)
@@ -218,9 +312,75 @@ step_length - step duration (seconds)
 def evaluate_model(model, x_test, y_test, pcap_duration, step_length):
 	score = model.evaluate(x_test, y_test, \
 		batch_size=int(pcap_duration/(step_length * 2)))
-	loss, accuracy = score
-	print "\nLoss: " + str(loss)
+	loss, accuracy, true_positive_rate, true_negative_rate, \
+		false_positive_rate, false_negative_rate = score
+	print "\n"
+	print "Loss: " + str(loss)
 	print "Accuracy: " + str(accuracy * 100) + "%"
+	print "True positive rate: " + str(true_positive_rate * 100) + "%"
+	print "True negative rate: " + str(true_negative_rate * 100) + "%"
+	print "False positive rate: " + str(false_positive_rate * 100) + "%"
+	print "False negative rate: " + str(false_negative_rate * 100) + "%"
+
+'''
+Counts the proportion of true positives to total actual positives
+'''
+def true_positives(y_true, y_pred):
+    y_pred_pos = K.round(K.clip(y_pred, 0, 1))
+    y_pos = K.round(K.clip(y_true, 0, 1))
+    true_positives = K.sum(y_pos * y_pred_pos) #/ K.sum(y_pos + K.epsilon())
+    return true_positives
+
+'''
+Counts the proportion of true negatives to total actual negatives
+'''
+def true_negatives(y_true, y_pred):
+    y_pred_neg = 1 - K.round(K.clip(y_pred, 0, 1))
+    y_neg = 1 - K.round(K.clip(y_true, 0, 1))
+    true_negatives = K.sum(y_neg * y_pred_neg) #/ K.sum(y_neg + K.epsilon())
+    return true_negatives
+
+'''
+Counts the proportion of false positives to total negatives
+'''
+def false_positives(y_true, y_pred):
+    y_pred_pos = K.round(K.clip(y_pred, 0, 1))
+    y_neg = 1 - K.round(K.clip(y_true, 0, 1))
+    false_positives = K.sum(y_neg * y_pred_pos) #/ K.sum(y_neg + K.epsilon())
+    return false_positives
+
+'''
+Counts the proportion of false negatives to total positives
+'''
+def false_negatives(y_true, y_pred):
+    y_pred_neg = 1 - K.round(K.clip(y_pred, 0, 1))
+    y_pos = K.round(K.clip(y_true, 0, 1))
+    false_negatives = K.sum(y_pos * y_pred_neg) #/ K.sum(y_pos + K.epsilon())
+    return false_negatives
+
+'''
+Displays the Receiver Operator Characteristic (ROC) curve with the area
+under its curve given the parameter model and x and y data arrays
+'''
+def generate_roc_curve(model, x_test, y_test, data_scenario, model_scenario):
+	# Get array of probabilities of that the y result is a 1
+	y_score = model.predict_proba(x_test)
+	# Compute ROC curve and ROC area for each class
+	fpr, tpr, _ = roc_curve(y_test, y_score)
+	roc_auc = auc(fpr, tpr)
+	plt.figure()
+	plt.plot(fpr, tpr, color='darkorange',
+	         lw=2, label='ROC curve (area = %0.2f)' % roc_auc)
+	plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+	plt.xlim([0.0, 1.0])
+	plt.ylim([0.0, 1.05])
+	plt.xlabel('False Positive Rate')
+	plt.ylabel('True Positive Rate')
+	plt.title('Receiver operating characteristic of scenario ' \
+		+ str(model_scenario) + '\'s model on scenario ' \
+		+ str(data_scenario) + '\'s data')
+	plt.legend(loc="lower right")
+	plt.show()
 
 '''
 Returns the pcap duration (in seconds) given the scenario number
@@ -265,22 +425,69 @@ def main():
 	step_length = 60
 	interval_length = 120
 
-	scenario = 10
-	pcap_file = sys.argv[1]
+	model_scenario = 12
+	data_scenario = 12 # scenario 9's data has good results for several models
+	#pcap_file = sys.argv[1]
 	# Dictionary of malicious IP addresses with start timestamp as its value
-	botnet_nodes = get_botnet_nodes(scenario)
-	pcap_duration = get_pcap_duration(scenario) # * 0.1
+	botnet_nodes = get_botnet_nodes(data_scenario)
+	pcap_duration = get_pcap_duration(data_scenario) # * 0.1
 
+	savefile_x = 'Scenario_' + str(data_scenario) + '_model/' + \
+		'x_scenario_' + str(data_scenario) + '.txt'
+	savefile_y = 'Scenario_' + str(data_scenario) + '_model/' + \
+		'y_scenario_' + str(data_scenario) + '.txt'
+	model_savefile = 'Scenario_' + str(model_scenario) + '_model/' + \
+		'model_scenario_' + str(model_scenario) + '.h5'
+	
+	'''
 	x, y = generate_input_arrays(pcap_file, botnet_nodes, pcap_duration, \
 		step_length = step_length, interval_length = interval_length, \
-		do_save=True, savefile_x='x.txt', savefile_y='y.txt', verbose = True)
-	# x, y = load_input_arrays(filename_x='x.txt', filename_y='y.txt')
+		do_save=True, savefile_x=savefile_x, savefile_y=savefile_y, verbose = True)
+	'''
+	x, y = load_input_arrays(filename_x=savefile_x, filename_y=savefile_y)
+	
+	'''
 	x_train, y_train, x_test, y_test = separate_into_sets(x, y, \
 		training_proportion = 0.7)
+	'''
+	balanced_savefile_x, balanced_savefile_y = \
+		balance_data(savefile_x, savefile_y)
+	balanced_x, balanced_y = load_input_arrays(filename_x=balanced_savefile_x, \
+		filename_y=balanced_savefile_y)
+	# Note that the test set contains all the data so obviously it includes the
+	# training data...since the training data is so limited, it likely will have
+	# little effect on the outcome though
+	_, _, x_test, y_test = separate_into_sets(x, y, training_proportion = 0)
+	x_train, y_train, x_test, y_test = \
+		separate_into_sets(balanced_x, balanced_y, training_proportion = 0.7)
 
-	model = create_model(x_train, y_train, pcap_duration, step_length, \
-	 	save_model=True, savefile="model.h5")
-	# model = load_model('model.h5')
+	weighted_y_train = np.copy(y_train)
+	weighted_y_train[weighted_y_train == 1] = 3.5
+	weighted_y_test = np.copy(y_test)
+	weighted_y_test[weighted_y_test == 1] = 3.5
+	# TEMPORARY: I AM APPLYING MY WEIGHTS HERE INSTEAD OF IN A CUSTOM LOSS FUNCTION
+	# (WHICH IS PROBABLY MORE CORRECT); CHANGE THIS LATER
+
+	#model = create_model(x_train, weighted_y_train, pcap_duration, step_length, \
+	# 	save_model=True, savefile=model_savefile)
+	model = load_model(model_savefile, custom_objects = \
+		{'true_positives': true_positives, 'false_positives': false_positives, \
+		 'true_negatives': true_negatives, 'false_negatives': false_negatives})
 	evaluate_model(model, x_test, y_test, pcap_duration, step_length)
+	generate_roc_curve(model, x_test, y_test, data_scenario, model_scenario)
 
 main()
+
+'''
+x, y = load_input_arrays(filename_x='Scenario_12_model/x_scenario_12.txt', \
+						 filename_y='Scenario_12_model/y_scenario_12.txt')
+x_train, y_train, x_test, y_test = separate_into_sets(x, y, \
+	training_proportion = 0.1)
+#model = create_model(x_train, y_train, 512, 1, \
+#	 	save_model=True, savefile='dumb_model.h5')
+model = load_model('dumb_model.h5')
+score = model.evaluate(x_test, y_test, batch_size=512)
+loss, accuracy = score
+print "\nLoss: " + str(loss)
+print "Accuracy: " + str(accuracy * 100) + "%"
+'''
