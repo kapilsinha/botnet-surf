@@ -1,15 +1,14 @@
 import sys, os
-from keras.models import Sequential
+from keras.models import Sequential, load_model
 from keras.layers import Dense, Dropout
-from keras.models import load_model
-import keras.backend as K
 import tensorflow as tf
 import numpy as np
 from sklearn.metrics import roc_curve, auc
+from graph_tool.all import *
 import matplotlib.pyplot as plt
 from random import random
 import create_graph
-from graph_tool.all import *
+from metrics import *
 
 """
 Vertex features - all 12 of these are calculated using graph-tool's functions:
@@ -135,10 +134,12 @@ def generate_input_arrays(pcap_filename, botnet_nodes, pcap_duration, \
 		'''
 		print str(float(100 * i)/int(float(pcap_duration - interval_length) \
 			/step_length)) + "%"
+		'''
 		if i < 12:
 			print "Dummy graph..."
 			pcap_graph.dummy_make_graph()
 			continue
+		'''
 		g = pcap_graph.make_graph()
 		# Degree
 		print "Out-degrees..."
@@ -197,7 +198,7 @@ def generate_input_arrays(pcap_filename, botnet_nodes, pcap_duration, \
 				y = np.append(y, 0)
 		# Save the file every 1% in case the loop fails at some point
 		if do_save and float(100 * i)/int(float(pcap_duration \
-			- interval_length)/step_length) > num:
+			- interval_length)/step_length) >= num:
 			num += 1
 			np.savetxt(savefile_x, x)
 			np.savetxt(savefile_y, y)
@@ -281,12 +282,15 @@ def create_model(x_train, y_train, pcap_duration, step_length, \
 	# Perhaps lower the rate if accuracy on the training or validation set
 	# is low and increase if training set worked well but test set did not
 	model.add(Dropout(0.5))
-	model.add(Dense(15, activation='relu'))
-	model.add(Dropout(0.5))
+	#model.add(Dense(15, activation='relu'))
+	#model.add(Dropout(0.5))
+	#model.add(Dense(15, activation='relu'))
+	#model.add(Dropout(0.5))
 	model.add(Dense(1, activation='sigmoid'))
 	model.compile(optimizer='rmsprop', loss='mean_squared_error', \
 		metrics=['accuracy', true_positives, true_negatives, \
-		false_positives, false_negatives])
+		false_positives, false_negatives, true_positive_rate, \
+		true_negative_rate, false_positive_rate, false_negative_rate])
 	model.fit(x_train, y_train, epochs=2000, \
 		batch_size=int(pcap_duration/(step_length * 2)))
 		#sample_weight = weights)
@@ -296,6 +300,7 @@ def create_model(x_train, y_train, pcap_duration, step_length, \
 	if save_model == True:
 		try:
 			model.save(savefile)
+			print "Saved model as " + str(savefile)
 		except:
 			print "Couldn't save the model"
 	return model
@@ -312,14 +317,19 @@ step_length - step duration (seconds)
 def evaluate_model(model, x_test, y_test, pcap_duration, step_length):
 	score = model.evaluate(x_test, y_test, \
 		batch_size=int(pcap_duration/(step_length * 2)))
-	loss, accuracy, true_positive_rate, true_negative_rate, \
+	loss, accuracy, true_positives, true_negatives, false_positives, \
+		false_negatives, true_positive_rate, true_negative_rate, \
 		false_positive_rate, false_negative_rate = score
 	print "\n"
 	print "Loss: " + str(loss)
 	print "Accuracy: " + str(accuracy * 100) + "%"
+	print "True positives: " + str(true_positives)
 	print "True positive rate: " + str(true_positive_rate * 100) + "%"
+	print "True negatives: " + str(true_negatives)
 	print "True negative rate: " + str(true_negative_rate * 100) + "%"
+	print "False positives: " + str(false_positives)
 	print "False positive rate: " + str(false_positive_rate * 100) + "%"
+	print "False negatives: " + str(false_negatives)
 	print "False negative rate: " + str(false_negative_rate * 100) + "%"
 
 '''
@@ -380,7 +390,9 @@ def generate_roc_curve(model, x_test, y_test, data_scenario, model_scenario):
 		+ str(model_scenario) + '\'s model on scenario ' \
 		+ str(data_scenario) + '\'s data')
 	plt.legend(loc="lower right")
-	plt.show()
+	plt.savefig("roc_curves/hidden_layers_3/model_" + str(model_scenario) + "_data_" + \
+		str(data_scenario) + "_hidden_layers_3.png")
+	#plt.show()
 
 '''
 Returns the pcap duration (in seconds) given the scenario number
@@ -424,9 +436,10 @@ def get_botnet_nodes(scenario):
 def main():
 	step_length = 60
 	interval_length = 120
+	
+	model_scenario = 9
+	data_scenario = 9 # scenario 9's data has good results for several models
 
-	model_scenario = 12
-	data_scenario = 12 # scenario 9's data has good results for several models
 	#pcap_file = sys.argv[1]
 	# Dictionary of malicious IP addresses with start timestamp as its value
 	botnet_nodes = get_botnet_nodes(data_scenario)
@@ -437,7 +450,7 @@ def main():
 	savefile_y = 'Scenario_' + str(data_scenario) + '_model/' + \
 		'y_scenario_' + str(data_scenario) + '.txt'
 	model_savefile = 'Scenario_' + str(model_scenario) + '_model/' + \
-		'model_scenario_' + str(model_scenario) + '.h5'
+		'model_scenario_' + str(model_scenario) + '_hidden_layers_3.h5'
 	
 	'''
 	x, y = generate_input_arrays(pcap_file, botnet_nodes, pcap_duration, \
@@ -458,7 +471,7 @@ def main():
 	# training data...since the training data is so limited, it likely will have
 	# little effect on the outcome though
 	_, _, x_test, y_test = separate_into_sets(x, y, training_proportion = 0)
-	x_train, y_train, x_test, y_test = \
+	x_train, y_train, _, _ = \
 		separate_into_sets(balanced_x, balanced_y, training_proportion = 0.7)
 
 	weighted_y_train = np.copy(y_train)
@@ -468,8 +481,10 @@ def main():
 	# TEMPORARY: I AM APPLYING MY WEIGHTS HERE INSTEAD OF IN A CUSTOM LOSS FUNCTION
 	# (WHICH IS PROBABLY MORE CORRECT); CHANGE THIS LATER
 
-	#model = create_model(x_train, weighted_y_train, pcap_duration, step_length, \
-	# 	save_model=True, savefile=model_savefile)
+	"""
+	model = create_model(x_train, weighted_y_train, pcap_duration, step_length, \
+	 	save_model=True, savefile=model_savefile)
+	"""
 	model = load_model(model_savefile, custom_objects = \
 		{'true_positives': true_positives, 'false_positives': false_positives, \
 		 'true_negatives': true_negatives, 'false_negatives': false_negatives})
@@ -477,17 +492,3 @@ def main():
 	generate_roc_curve(model, x_test, y_test, data_scenario, model_scenario)
 
 main()
-
-'''
-x, y = load_input_arrays(filename_x='Scenario_12_model/x_scenario_12.txt', \
-						 filename_y='Scenario_12_model/y_scenario_12.txt')
-x_train, y_train, x_test, y_test = separate_into_sets(x, y, \
-	training_proportion = 0.1)
-#model = create_model(x_train, y_train, 512, 1, \
-#	 	save_model=True, savefile='dumb_model.h5')
-model = load_model('dumb_model.h5')
-score = model.evaluate(x_test, y_test, batch_size=512)
-loss, accuracy = score
-print "\nLoss: " + str(loss)
-print "Accuracy: " + str(accuracy * 100) + "%"
-'''
