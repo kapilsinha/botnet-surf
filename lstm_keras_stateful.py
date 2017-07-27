@@ -95,6 +95,8 @@ def time_window_data(x, y, window_num_steps, window_step_size):
 	num_windows = float(len(x[0]) - window_num_steps) / window_step_size + 1
 	if num_windows != int(num_windows):
 		num_windows = int(num_windows) + 1 # round up to nearest number
+	else:
+		num_windows = int(num_windows)
 
 	new_x = np.empty([len(x) * num_windows, window_num_steps, len(x[0][0])])
 	new_y = np.empty([len(y) * num_windows])
@@ -111,7 +113,7 @@ def time_window_data(x, y, window_num_steps, window_step_size):
 		else:
 			k += window_step_size
 			l += window_step_size
-	return new_x, new_y
+	return new_x, new_y, len(x), num_windows
 
 '''
 Normalizes a vertex characteristic by calculating (x - min)/(max - min)
@@ -291,15 +293,45 @@ x - x NumPy array
 y - y NumPy array
 training_proportion - Decimal equivalent of how much of the arrays are to be
                       used for the training sets
+positive proportion - Decimal equivalent of how many positive instances are to
+                      be used for the training sets (note that if the positive
+                      proportion is specified, the training proportion is
+                      ignored)
 '''
-def separate_into_sets(x, y, training_proportion=0.7):
-	if training_proportion > 1 or training_proportion < 0:
-		print "Training proportion must be 0 and 1. Using 0.7 as default"
-		training_proportion = 0.7
-	x_train = x[0:int(training_proportion * len(x))]
-	y_train = y[0:int(training_proportion * len(y))]
-	x_test = x[int(training_proportion * len(x)):]
-	y_test = y[int(training_proportion * len(y)):]
+def separate_into_sets(x, y, training_proportion=0.7, positive_proportion=None):
+	if positive_proportion != None:
+		if positive_proportion > 1 or positive_proportion < 0:
+			print "Positive proportion must be 0 and 1. Using 0.7 as default"
+			positive_proportion = 0.7
+		positive_count = 0
+		for element in y:
+			if element == 1:
+				positive_count += 1
+		included_positives = int(float(positive_proportion) * positive_count)
+		print str(included_positives), \
+			" postive samples will be included in the training sets"
+		print str(positive_count - included_positives), \
+			" postive samples will be included in the testing sets"
+		last_i = 0
+		for i in range(len(y)):
+			if y[i] == 1:
+				included_positives -= 1
+			if included_positives == 0:
+				last_i = i
+				break
+		x_train = x[0:last_i + 1]
+		y_train = y[0:last_i + 1]
+		x_test = x[last_i + 1:]
+		y_test = y[last_i + 1:]
+
+	else:
+		if training_proportion > 1 or training_proportion < 0:
+			print "Training proportion must be 0 and 1. Using 0.7 as default"
+			training_proportion = 0.7
+		x_train = x[0:int(training_proportion * len(x))]
+		y_train = y[0:int(training_proportion * len(y))]
+		x_test = x[int(training_proportion * len(x)):]
+		y_test = y[int(training_proportion * len(y)):]
 	return x_train, y_train, x_test, y_test
 
 '''
@@ -312,7 +344,7 @@ step_length - step duration (seconds)
 save_model - True if model is saved in an h5 file
 savefile - name of file that the model is saved to
 '''
-def create_model(x_train, y_train, pcap_duration, step_length, \
+def create_model(x_train, y_train, num_samples, windows_per_sample, \
 	save_model=True, savefile="model.h5"):
 	print "Starting the creation of the model"
 	model = Sequential()
@@ -327,25 +359,49 @@ def create_model(x_train, y_train, pcap_duration, step_length, \
 	model.add(LSTM(32, batch_input_shape=(len(x_train), len(x_train[0]), \
 		len(x_train[0][0])), return_sequences=True, stateful=False))
 	'''
-	model.add(LSTM(32, input_shape=(len(x_train[0]), \
-		len(x_train[0][0])), return_sequences=True, stateful=False))
 	# Dropout: Randomly set half (arbitrarily fraction) of the input units
 	# to 0 at each update during training, which helps prevent overfitting.
 	# Perhaps lower the rate if accuracy on the training or validation set
 	# is low and increase if training set worked well but test set did not
-	model.add(Dropout(0.5))
-	#model.add(LSTM(32))
-	#model.add(Dropout(0.5))
-	#model.add(LSTM(32))
-	#model.add(Dropout(0.5))
+	
+	"""
+	# One layer:
+	model.add(LSTM(64, batch_input_shape=(windows_per_sample, len(x_train[0]), \
+		len(x_train[0][0])), return_sequences=True, stateful=True))
 	model.add(Flatten())
 	model.add(Dense(1, activation='sigmoid'))
+	"""
+	
+	
+	# Two layers:
+	model.add(LSTM(64, batch_input_shape=(windows_per_sample, len(x_train[0]), \
+		len(x_train[0][0])), return_sequences=True, stateful=True))
+	model.add(Dropout(0.5))
+	model.add(LSTM(64))
+	model.add(Dropout(0.5))
+	model.add(Dense(1, activation='sigmoid'))
+	
+	"""
+	# Three layers:
+	model.add(LSTM(64, batch_input_shape=(windows_per_sample, len(x_train[0]), \
+		len(x_train[0][0])), return_sequences=True, stateful=True))
+	model.add(Dropout(0.5))
+	model.add(LSTM(64, return_sequences=True))
+	model.add(Dropout(0.5))
+	model.add(LSTM(64))
+	model.add(Dropout(0.5))
+	model.add(Dense(1, activation='sigmoid'))
+	"""
+
 	model.compile(optimizer='rmsprop', loss='mean_squared_error', \
 		metrics=['accuracy', true_positives, true_negatives, \
 		false_positives, false_negatives, true_positive_rate, \
 		true_negative_rate, false_positive_rate, false_negative_rate])
-	model.fit(x_train, y_train, epochs=20, \
-		batch_size=int(pcap_duration/(step_length * 2)), shuffle = False)
+	for i in range(num_samples):
+		model.fit(x_train, y_train, epochs=20, \
+			batch_size=windows_per_sample, shuffle = False)
+		model.reset_states()
+
 	if save_model == True:
 		try:
 			model.save(savefile)
@@ -363,9 +419,10 @@ y_test - NumPy array for y test set
 pcap_duration - pcap duration (seconds) - available on CTU website
 step_length - step duration (seconds)
 '''
-def evaluate_model(model, x_test, y_test, pcap_duration, step_length):
-	score = model.evaluate(x_test, y_test, \
-		batch_size=int(pcap_duration/(step_length * 2)))
+def evaluate_model(model, x_test, y_test, windows_per_sample):
+	# Stateful LSTM:
+	score = model.evaluate(x_test, y_test, batch_size=windows_per_sample)
+	model.reset_states()
 	loss, accuracy, true_positives, true_negatives, false_positives, \
 		false_negatives, true_positive_rate, true_negative_rate, \
 		false_positive_rate, false_negative_rate = score
@@ -385,9 +442,9 @@ def evaluate_model(model, x_test, y_test, pcap_duration, step_length):
 Displays the Receiver Operator Characteristic (ROC) curve with the area
 under its curve given the parameter model and x and y data arrays
 '''
-def generate_roc_curve(model, x_test, y_test, data_scenario, model_scenario):
+def generate_roc_curve(model, x_test, y_test, windows_per_sample, data_scenario, model_scenario):
 	# Get array of probabilities of that the y result is a 1
-	y_score = model.predict_proba(x_test)
+	y_score = model.predict_proba(x_test, batch_size=windows_per_sample) # THIS  LINE CAUSES THE STATEFUL LSTM TO FAIL
 	# Compute ROC curve and ROC area for each class
 	fpr, tpr, _ = roc_curve(y_test, y_score)
 	roc_auc = auc(fpr, tpr)
@@ -458,47 +515,79 @@ def main():
 	botnet_nodes = get_botnet_nodes(data_scenario)
 	pcap_duration = get_pcap_duration(data_scenario) # * 0.1
 
-	savefile_x = 'lstm_results/x_scenario_' + str(data_scenario) + '_lstm.txt'
-	savefile_y = 'lstm_results/y_scenario_' + str(data_scenario) + '_lstm.txt'
-	model_savefile = 'lstm_model_scenario_' + str(model_scenario) + '.h5'
+	savefile_x = 'lstm_inputs/x_scenario_' + str(data_scenario) + '_lstm.txt'
+	savefile_y = 'lstm_inputs/y_scenario_' + str(data_scenario) + '_lstm.txt'
+	model_savefile = 'stateful_lstm_model_scenario_' + str(model_scenario) + '.h5'
 
+	'''
+	Note that it's important that the original x and y are processed in the
+	following order: balanced (maintain a certain ratio between postive and
+	negative samples), separated into training and testing sets, and then
+	broken into time windows (for stateful LSTM). This is because balancing
+	data before keeps the entire initial time interval for the chosen samples
+	and then the testing and training sets each contain of fewer samples with
+	their entire time intervals. Finally we break each set's samples' entire
+	time interval into time windows (as opposed to breaking into time windows
+	and haphazardly choosing time windows from the entire time interval)
+	'''
+
+	# x and y contain the entire dataset in these NumPy arrays
 	'''
 	x, y = generate_input_arrays(pcap_file, botnet_nodes, pcap_duration, \
 		step_length = step_length, interval_length = interval_length, \
-		do_save=True, savefile_x=savefile_x, savefile_y=savefile_y, verbose = True)
+		do_save=True, savefile_x=savefile_x, savefile_y=savefile_y, \
+		verbose = True)
 	'''
 	x, y = load_input_arrays(filename_x=savefile_x, filename_y=savefile_y)
-	x, y = time_window_data(x, y, 5, 2)
-	'''
-	x_train, y_train, x_test, y_test = separate_into_sets(x, y, \
-		training_proportion = 0.7)
-	'''
+
+	# Balanced x and y arrays maintain a certain ratio; each sample contains
+	# its entire time interval
 	balanced_x, balanced_y = balance_data(x, y, ratio = 10)
+
+	# Pre-(x/y)-(train/test) separate the balanced x and y arrays based on a
+	# certain ratio -> each sample still contains its entire time interval
+	'''
 	# Note that the test set contains all the data so obviously it includes the
-	# training data...since the training data is so limited, it likely will have
-	# little effect on the outcome though
-	_, _, x_test, y_test = separate_into_sets(x, y, training_proportion = 0)
-	x_train, y_train, _, _ = \
+	# training data
+	_, _, pre_x_test, pre_y_test = \
+		separate_into_sets(x, y, training_proportion = 0)
+	pre_x_train, pre_y_train, _, _ = \
 		separate_into_sets(balanced_x, balanced_y, training_proportion = 0.7)
-	print x.shape, y.shape
-	print x_test.shape, y_test.shape
-	print x_train.shape, y_train.shape
+	'''
+	pre_x_train, pre_y_train, pre_x_test, pre_y_test = \
+		separate_into_sets(balanced_x, balanced_y, positive_proportion = 0.5)
+
+	# (x,y)_(train/test) contains the chosen samples (balanced and broken into
+	# time windows)
+	x_train, y_train, num_training_samples, windows_per_training_sample \
+		= time_window_data(pre_x_train, pre_y_train, 5, 2)
+	x_test, y_test, num_testing_samples, windows_per_testing_sample \
+		= time_window_data(pre_x_test, pre_y_test, 5, 2)
+
+	print "Original x, y shapes: ", x.shape, y.shape
+	print "Number of training samples: ", str(num_training_samples)
+	print "Number of windows per training sample: ", str(windows_per_training_sample)
+	print "Number of testing samples: ", str(num_testing_samples)
+	print "Number of windows per testing sample: ", str(windows_per_testing_sample)
+	print "x_train, y_train shapes: ", x_train.shape, y_train.shape
+	print "x_test, y_test shapes: ", x_test.shape, y_test.shape
 
 	weighted_y_train = np.copy(y_train)
-	weighted_y_train[weighted_y_train == 1] = 5
+	weighted_y_train[weighted_y_train == 1] = 6
 	weighted_y_test = np.copy(y_test)
-	weighted_y_test[weighted_y_test == 1] = 5
+	weighted_y_test[weighted_y_test == 1] = 6
 	# TEMPORARY: I AM APPLYING MY WEIGHTS HERE INSTEAD OF IN A CUSTOM LOSS FUNCTION
 	# (WHICH IS PROBABLY MORE CORRECT); CHANGE THIS LATER
-	model = create_model(x_train, weighted_y_train, pcap_duration, step_length, \
-	 	save_model=True, savefile=model_savefile)
+	model = create_model(x_train, weighted_y_train, num_training_samples, \
+		windows_per_training_sample, save_model=False, savefile=model_savefile)
 	
 	"""
 	model = load_model(model_savefile, custom_objects = \
 		{'true_positives': true_positives, 'false_positives': false_positives, \
 		 'true_negatives': true_negatives, 'false_negatives': false_negatives})
 	"""
-	evaluate_model(model, x_test, y_test, pcap_duration, step_length)
-	generate_roc_curve(model, x_test, y_test, data_scenario, model_scenario)
+	evaluate_model(model, x_test, y_test, windows_per_testing_sample)
+	generate_roc_curve(model, x_test, y_test, windows_per_testing_sample, \
+		data_scenario, model_scenario)
 
 main()
