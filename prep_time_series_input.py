@@ -2,6 +2,7 @@ import numpy as np
 from random import random
 from graph_tool.all import *
 import create_graph
+import scenario_info
 
 '''
 Normalizes a vertex characteristic by calculating (x - min)/(max - min)
@@ -14,13 +15,10 @@ def normalize(array):
 	return array
 
 '''
-Creates undersampled x and y files with the same name as the input but with an
-added "_balanced". Returns just the name of the files created
+Creates undersampled x and y arrays and returns them
 Parameters:
 x - x NumPy array
 y - y NumPy array
-x_file - file with unbalanced number of x inputs
-y_file - file with unbalanced number of y inputs
 ratio - desired ratio of non-malicious to malicious nodes
 '''
 def balance_data(x, y, ratio=5):
@@ -58,6 +56,40 @@ def balance_data(x, y, ratio=5):
 	return new_x, new_y
 
 '''
+Helper function that calculates the value of y given the scenario number,
+and window start and end times.
+If a botnet node's window start and end times are before time of infection,
+then y = 0 (non-malicious). Obviously if the window start and end times
+are after time of infection, then y = 1 (malicious).
+Note: I don't have access to the IP addresses of nodes at this point so I
+can't retrieve the exact time of infection for the nodes; thus I will simply
+use the earliest time of infection of all the botnet nodes (not ideal but 
+should work more or less).
+Note: I don't really know what to do for windows that contain the start 
+and/or end time - mark it as malicious or non-malicious or neither? Though
+doing neither may be the most correct approach, this will be difficult to deal
+with since I am dealing with binary classification and need to keep shapes of
+these arrays constant. For now I'll treat it as malicious (can experiment later)
+Parameters:
+sample_y - 1 if the node is a botnet node (infected at some point), else 0
+scenario - CTU dataset number
+window_start_time - time (seconds since epoch) that the window started
+window_end_time - time (seconds since epoch) that the window ended
+'''
+def calculate_y(sample_y, scenario, window_start_time, window_end_time):
+	# If the node is never infected, it is always non-malicious
+	if sample_y == 0:
+		return 0
+	# assert window_start_time < window_end_time
+	infection_time = min(scenario_info.get_botnet_nodes(scenario).values())
+	if window_start_time < infection_time and window_end_time < infection_time:
+		return 0
+	elif window_start_time < infection_time and window_end_time > infection_time:
+		return 0 # I can experiment with this value
+	else: # if window_start_time > infection_time and window_end_time > infection_time
+		return 1
+
+'''
 Creates x and y files broken into time windows with the same name as the input
 but with an added "_windows". Returns just the name of the files created
 Note that this is memory inefficient since it creates another giant array and
@@ -69,8 +101,12 @@ x - x NumPy array
 y - y NumPy array
 window_num_steps - number of time steps per time window
 window_step_size - number of time steps to step over between time windows
+interval_length - number of seconds in each interval (in the graph)
+step_length - number of seconds stepped between intervals (in the graph)
+scenario - CTU 13 scenario number
 '''
-def time_window_data(x, y, window_num_steps, window_step_size):
+def time_window_data(x, y, window_num_steps, window_step_size, interval_length, \
+		step_length, scenario):
 	if window_num_steps > len(x[0]):
 		print "Time chunk is greater than the original number of time steps" \
 			+ " Using original number of time steps as time chunk"
@@ -86,17 +122,32 @@ def time_window_data(x, y, window_num_steps, window_step_size):
 	new_y = np.empty([len(y) * num_windows])
 	
 	j, k, l = 0, 0, window_num_steps
+	window_start_time = scenario_info.get_capture_start_time(scenario)
+	window_end_time = window_start_time + interval_length + step_length * window_num_steps
 	for i in range(len(new_x)):
 		new_x[i] = x[j][k:l]
-		new_y[i] = y[j]
-		if l == len(x[j]):
+		new_y[i] = calculate_y(y[j], scenario, window_start_time, window_end_time) # y[j]
+		if l == len(x[j]): # reset variables for the next sample
 			k, l = 0, window_num_steps
 			j += 1
-		elif l + window_step_size > len(x[j]):
+			window_start_time = scenario_info.get_capture_start_time(scenario)
+			window_end_time = window_start_time + interval_length + step_length * window_num_steps
+		elif l + window_step_size > len(x[j]): # go to the last step in the sample
 			k, l = len(x[j]) - window_num_steps, len(x[j])
-		else:
+			window_start_time = scenario_info.get_capture_start_time(scenario) \
+				+ k * step_length
+			window_end_time = scenario_info.get_capture_start_time(scenario) \
+				+ interval_length + l * step_length
+		else: # regular step in the same sample
 			k += window_step_size
 			l += window_step_size
+			# The following should be equivalent
+			# window_start_time += step_length * window_step_size
+			window_start_time = scenario_info.get_capture_start_time(scenario) \
+				+ k * step_length
+			# window_end_time = window_start_time + interval_length + step_length * window_num_steps
+			window_end_time = scenario_info.get_capture_start_time(scenario) \
+				+ interval_length + l * step_length
 	return new_x, new_y, len(x), num_windows
 
 '''

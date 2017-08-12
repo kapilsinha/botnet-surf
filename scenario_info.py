@@ -13,7 +13,8 @@ def get_pcap_duration(scenario):
 		return 4400
 
 '''
-Returns the botnet_nodes dictionary given the scenario number.
+Returns the botnet_nodes dictionary (where botnet IP addresses are keys and 
+the time they started are their values) given the scenario number.
 Note that this is given in more detail in infected_hosts.txt
 '''
 def get_botnet_nodes(scenario):
@@ -35,3 +36,20 @@ def get_botnet_nodes(scenario):
 	if scenario == 12:
 		return {"147.32.84.165": 1313743359, "147.32.84.191": 1313743638, \
                 "147.32.84.192": 1313743825}
+
+'''
+Returns the time that the capture started given the scenario number
+'''
+def get_capture_start_time(scenario):
+	if scenario == 9: # Starts at 14:24:08 CEST
+		# approx 143 minutes before first infected botnet host
+		return 1313575261
+	if scenario == 10: # Starts at 10:19:02 CEST
+		# approx 44 minutes before first infected botnet host
+		return 1313655542
+	if scenario == 11: # Starts at 15:39:41 CEST
+		# approx 9 minutes before first infected botnet host
+		return 1313674802
+	if scenario == 12: # Starts at 10:32:08 CEST
+		# approx 15 minutes before first infected botnet host
+		return 1313742728
