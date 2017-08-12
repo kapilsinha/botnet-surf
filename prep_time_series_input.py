@@ -85,7 +85,7 @@ def calculate_y(sample_y, scenario, window_start_time, window_end_time):
 	if window_start_time < infection_time and window_end_time < infection_time:
 		return 0
 	elif window_start_time < infection_time and window_end_time > infection_time:
-		return 0 # I can experiment with this value
+		return 1 # I can experiment with this value
 	else: # if window_start_time > infection_time and window_end_time > infection_time
 		return 1
 
