@@ -6,23 +6,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 from random import random
 from sklearn.metrics import roc_curve, auc
-from graph_tool.all import *
 
 import prep_input
 import scenario_info
-import create_graph
 from metrics import *
-
-"""
-Vertex features - all 12 of these are calculated using graph-tool's functions:
-["Out-degree", "In-degree", "# of in-neighbors", "# of out-neighbors", 
- "Page Rank", "Betweenness", "Closeness", "Eigenvector", "Katz",
- "Authority centrality", "Hub centrality", "Clustering coefficient"]
-The above features will be normalized and placed in a vector for each vertex
-in each time interval
-"""
-
-VECTOR_SIZE = 12 # number of vertex characteristics in the vector
 
 # Disable print statements
 def blockPrint():
@@ -134,25 +121,25 @@ def main():
 	step_length = 60
 	interval_length = 120
 	
-	model_scenario = 9
-	data_scenario = 9 # scenario 9's data has good results for several models
+	model_scenario = 11
+	data_scenario = 11 # scenario 9's data has good results for several models
 
-	#pcap_file = sys.argv[1]
+	pcap_file = sys.argv[1]
 	# Dictionary of malicious IP addresses with start timestamp as its value
 	botnet_nodes = scenario_info.get_botnet_nodes(data_scenario)
 	pcap_duration = scenario_info.get_pcap_duration(data_scenario) # * 0.1
 
-	savefile_x = 'Scenario_' + str(data_scenario) + '_model/' + \
+	savefile_x = 'neural_net_inputs/Scenario_' + str(data_scenario) + '_model/' + \
 		'x_scenario_' + str(data_scenario) + '.txt'
-	savefile_y = 'Scenario_' + str(data_scenario) + '_model/' + \
+	savefile_y = 'neural_net_inputs/Scenario_' + str(data_scenario) + '_model/' + \
 		'y_scenario_' + str(data_scenario) + '.txt'
 	model_savefile = 'Scenario_' + str(model_scenario) + '_model/' + \
 		'model_scenario_' + str(model_scenario) + '_hidden_layers_3.h5'
 	
-	'''
 	x, y = prep_input.generate_input_arrays(pcap_file, botnet_nodes, pcap_duration, \
 		step_length = step_length, interval_length = interval_length, \
 		do_save=True, savefile_x=savefile_x, savefile_y=savefile_y, verbose = True)
+	'''
 	'''
 	x, y = prep_input.load_input_arrays(filename_x=savefile_x, filename_y=savefile_y)
 	

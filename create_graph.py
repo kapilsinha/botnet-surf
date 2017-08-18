@@ -30,6 +30,7 @@ or <class 'pcapfile.protocols.network.ip.IP'>
 import os
 import sys
 from pcapfile import savefile
+import pcapfile.protocols.network.ip # imported to get port numbers
 from graph_tool.all import *
 import bisect
 '''
@@ -53,7 +54,8 @@ class PcapGraph:
             = savefile.load_savefile(testcap, layers=2, lazy=True).packets
         self.step_length = step_length
         self.interval_length = interval_length
-        # Edges are a list of tuples of the form (ip_source, ip_dest, timestamp, num_bytes)
+        # Edges WERE a list of tuples of the form (ip_source, ip_dest, timestamp, num_bytes)
+        # Now they're (ip_source, ip_dest, timestamp, port_source, port_dest, TTL, num_bytes)
         self.edges = []
         self.nodes = []
         # I "use up" an edge from the graph to get this earliest_timestamp, but
@@ -66,6 +68,7 @@ class PcapGraph:
             - self.step_length
         self.latest_timestamp = 0
         self.last_g = None # contains the most recent g variable
+        self.reached_file_end = False # True if our packet generator runs out
 
     def open_pcap_file(self, fname):
         try:
@@ -112,14 +115,24 @@ class PcapGraph:
                 if p.packet.type != 2048: # if EtherType is not IPv4
                     continue
 
-                ip_source = p.packet.payload.src
-                ip_dest = p.packet.payload.dst
-                
-                num_bytes = len(p.packet.payload.payload) // 2
+                # Note that it is important to have this stuff in a try block because
+                # some of it raises errors - I could try to replace the error values
+                # with dummy ones but it happens rarely enough that I can just skip it
+                try:
+                    ip_source = p.packet.payload.src
+                    ip_dest = p.packet.payload.dst
+                    p.packet.payload.load_transport()
+                    port_source = p.packet.payload.payload.src_port
+                    port_dest = p.packet.payload.payload.dst_port
+                    ttl = p.packet.payload.ttl
+                    num_bytes = len(p.packet.payload.payload) // 2
+                except:
+                    continue
 
                 # I removed the portion that combines consecutive packets if 
                 # they are from the same source and to the same destination
-                self.edges.append((ip_source, ip_dest, p.timestamp, num_bytes))
+                self.edges.append((ip_source, ip_dest, p.timestamp, port_source, \
+                    port_dest, ttl, num_bytes))
 
                 '''
                 # Less efficient
@@ -138,9 +151,13 @@ class PcapGraph:
                     self.nodes.insert(j, ip_dest)
 
         except StopIteration: # exception thrown when our generator runs out
-            pass
+            self.reached_file_end = True
         del self.nodes[-1]
 
+    '''
+    Returns graph g, which contains the nodes and edges and their property
+    maps
+    '''
     def make_graph(self, save_graph=False, save_filename="graph_structure.gt"):
         self.read_pcap_file()
         # If our step would take our earliest timestamp past the end of the
@@ -160,6 +177,9 @@ class PcapGraph:
         g.edge_properties["num_bytes"] = g.new_edge_property("int")
         g.edge_properties["ip_source"] = g.new_edge_property("string")
         g.edge_properties["ip_dest"] = g.new_edge_property("string")
+        g.edge_properties["port_source"] = g.new_edge_property("int")
+        g.edge_properties["port_dest"] = g.new_edge_property("int")
+        g.edge_properties["ttl"] = g.new_edge_property("int")
 
         # sorted list of tuples of the form (ip_address, vertex_index)
         vertex_ip_list = []
@@ -178,7 +198,10 @@ class PcapGraph:
             g.ep.ip_source[e] = edge[0]
             g.ep.ip_dest[e] = edge[1]
             g.ep.timestamp[e] = edge[2]
-            g.ep.num_bytes[e] = edge[3]
+            g.ep.port_source[e] = edge[3]
+            g.ep.port_dest[e] = edge[4]
+            g.ep.ttl[e] = edge[5]
+            g.ep.num_bytes[e] = edge[6]
 
         if save_graph == True:
             save_type = save_filename.split(".")[1]
@@ -188,9 +211,27 @@ class PcapGraph:
                 print("Invalid save type. Graph not saved.")
         self.last_g = g
         return g
+
+    '''
+    Just iterates over the packet generator the amount necessary to cover
+    the interval (used to get to a particular spot in the file.
+    Note that this is never used in graph_gui, just in neural_network_keras
+    as of now
+    '''
+    def dummy_make_graph(self):
+        try:
+            self.earliest_timestamp += self.step_length
+            while True:
+                p = self.packet_generator.next() 
+                self.latest_timestamp = p.timestamp
+                if p.timestamp > self.earliest_timestamp + self.interval_length:
+                    break
+
+        except StopIteration: # exception thrown when our generator runs out
+            self.reached_file_end = True
 """
 filename = sys.argv[1]
-pcap_graph = PcapGraph(filename)
+pcap_graph = PcapGraph(filename, interval_length=1)
 g1 = pcap_graph.make_graph()
 
 print pcap_graph.step_length
