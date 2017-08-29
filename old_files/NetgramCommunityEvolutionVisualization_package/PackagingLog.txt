@@ -1,0 +1,19 @@
+mcc -W python:NetgramCommunityEvolutionVisualization -T link:lib -d C:\Users\ksinha\Desktop\Netgram_Tool\NetgramCommunityEvolutionVisualization\for_testing -v C:\Users\ksinha\Desktop\Netgram_Tool\run_script.m 
+Compiler version: 6.1 (R2015b)
+
+Dependency analysis by REQUIREMENTS.
+
+[Warning: Adding path "C:\Users\ksinha\Desktop\Netgram_Tool" to Compiler path
+instance.] 
+[] 
+Parsing file "C:\Users\ksinha\Desktop\Netgram_Tool\run_script.m"
+	(Referenced from: "Compiler Command Line").
+Deleting 0 temporary MEX authorization files.
+Generating file "C:\Users\ksinha\Desktop\Netgram_Tool\NetgramCommunityEvolutionVisualization\for_testing\NetgramCommunityEvolutionVisualization\__init__.py".
+Generating file "C:\Users\ksinha\Desktop\Netgram_Tool\NetgramCommunityEvolutionVisualization\for_testing\setup.py".
+Generating file "C:\Users\ksinha\Desktop\Netgram_Tool\NetgramCommunityEvolutionVisualization\for_testing\readme.txt".
+Packaging...
+Creating the bundle...
+Web based installer created at C:\Users\ksinha\Desktop\Netgram_Tool\NetgramCommunityEvolutionVisualization\for_redistribution\MyAppInstaller_web.exe.
+Packaging complete.
+Elapsed packaging time was: 1 minutes and 6 seconds.
