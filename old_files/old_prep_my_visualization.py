@@ -78,38 +78,11 @@ def most_similar_group(vector, clusters):
 			most_similar_group = i + 1
 	return most_similar_group
 
-'''
-Converts the x and y LSTM inputs to the corresponding input usable by a 
-SOM or backprop neural network (removing the time-series format) by 
-converting the 3-D x array to a 2-D array and removing the zero vectors
-and associating the y array to individual vectors instead of the entire
-time-series. Returns the resulting x and y
-'''
-def convert_lstm_to_regular_input(x, y):
-	num_samples, num_time_intervals, vector_size = x.shape
-	# Repeat each element in lstm_y such that each vector (as opposed to
-	# time-series) in lstm_x has a corresponding y value
-	new_y = np.repeat(y, num_time_intervals)
-	# Reshape x so that it is 2-D (the form we want) instead of 3-D (the
-	# time-series format)
-	x = x.reshape(num_samples * num_time_intervals, vector_size)
-	# Remove zero vectors
-	zero_vector = np.array([0] * vector_size)
-	# Indices of vectors we will remove from x and values we will remove from y
-	delete_indices = []
-	for i in range(len(x)):
-		if np.array_equal(x[i], zero_vector):
-			delete_indices.append(i)
-	x = np.delete(x, delete_indices, 0)
-	new_y = np.delete(new_y, delete_indices)
-	print "Converted LSTM inputs to SOM inputs"
-	return x, new_y
-
 def main():
 	step_length = 60
 	interval_length = 120
 	
-	data_scenario = sys.argv[3]
+	data_scenario = 11
 	#pcap_file = sys.argv[1]
 	# Dictionary of malicious IP addresses with start timestamp as its value
 	botnet_nodes = scenario_info.get_botnet_nodes(data_scenario)
@@ -127,31 +100,13 @@ def main():
 	x_total, y_total = prep_time_series_input. \
 		load_input_arrays(filename_x=savefile_x, filename_y=savefile_y)
 	'''
-	# The below must be an LSTM input file (NOT NORMALIZED!)
-	filename_x = sys.argv[1]
-	filename_y = sys.argv[2]
-
-	x_total, y = prep_time_series_input.load_input_arrays(filename_x \
-		= filename_x, filename_y = filename_y)
-	print "Loaded LSTM x shape: ", str(x_total.shape)
-	print "Loaded LSTM y shape: ", str(y.shape)
-	# Keep only the 10 characteristics for the SOM
-	x_total = np.delete(x_total, np.s_[12:], 2) # remove non-graph features
-	x_total = np.delete(x_total, np.s_[6, 8], 2) # remove closeness (feature 7) and Katz (feature 9)
-	print "Removed the extraneous features " \
-		"(keeping just the 10 graph-based features excluding closeness and Katz)"
-	print "Trimmed LSTM x shape: ", str(x_total.shape)
-	print "Trimmed LSTM y shape: ", str(y.shape)
-	num_samples = len(x_total)
-
 	# The below must be a regular SOM input file
-	x, _ = convert_lstm_to_regular_input(x_total, y)
-	print "Converted SOM x shape: ", str(x.shape)
+	x, y = load_input_arrays(filename_x=sys.argv[1], filename_y=sys.argv[2])
 	height, length = 5, 5 # SOM dimensions
 	# Train a 5x5 SOM with 500 iterations
 	
 	print "Training the SOM"
-	som = SOM(length, height, VECTOR_SIZE, 1)
+	som = SOM(length, height, VECTOR_SIZE, 100)
 	som.train(x, verbose = True)
 	 
 	# Get output grid
@@ -185,22 +140,29 @@ def main():
 	clusters = np.reshape(clusters, (length * height, VECTOR_SIZE))
 	print clusters
 	print cluster_distances
-	clusters = list(clusters)
+	# [clusters for _,clusters in sorted(zip(cluster_distances,clusters))]
+	clusters = [clusters for _,clusters in sorted(zip(cluster_distances,clusters))]
 	for i in range(len(clusters)):
 		clusters[i] = list(clusters[i])
 	print clusters
-	clusters = [clusters for _,clusters in sorted(zip(cluster_distances,clusters))]
-	print clusters
-	with open("scenario_" + str(data_scenario) + "_som_" + str(height) + "_" \
-		+ str(length) + "_clusters.txt", "w") as f:
+	with open("scenario_11_som_" + str(height) + "_" + str(length) + \
+		"_clusters.txt", "w") as f:
 		f.write(str(clusters))
 	'''
 	# Output from above (to avoid running it again)
-	with open("scenario_" + str(data_scenario) + "_som_" + str(height) + "_" + str(length) + \
-		"_clusters.txt", "w") as f:
+	with open("scenario_11_som_" + str(height) + "_" + str(length) + \
+		"_clusters.txt", "r") as f:
 		clusters = eval(f.readline())
 	# print clusters
 	'''
+	# The below must be an LSTM input file
+	filename_x = sys.argv[3]
+	filename_y = sys.argv[4]
+	# mat_filename = 'output_mat_file.mat'
+
+	x_total, y = prep_time_series_input.load_input_arrays(filename_x \
+		= filename_x, filename_y = filename_y)
+	num_samples = len(x_total)
 
 	"""
 	The x and y are now in the shape [[[feature size] * time_stamps] * samples]
