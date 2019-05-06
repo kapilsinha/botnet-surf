@@ -3,7 +3,7 @@ This repo allow us to read in PCap Files and outputs a GUI representing it as a 
 
 ## Getting Started
 
-### Prerequisities
+### Prerequisites
 ```
 Python 2.7
 ```
