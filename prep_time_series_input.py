@@ -375,7 +375,7 @@ def generate_input_arrays(pcap_filename, botnet_nodes, pcap_duration, \
             min_outgoing_packet_size, number_incoming_bytes, \
             number_outgoing_bytes, number_source_ports, number_dest_ports, \
             avg_incoming_ttl, max_incoming_ttl, min_incoming_ttl, \
-            avg_outgoing_ttl, max_outgoing_ttl, max_outgoing_ttl]).transpose()
+            avg_outgoing_ttl, max_outgoing_ttl, min_outgoing_ttl]).transpose()
         
         # Add vertex vectors to dict_x
         # Consider changing the dictionaries to sorted lists so you can
